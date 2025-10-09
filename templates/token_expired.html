@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Expired - Oauth Contacts and Calendar Exporter</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .expired-icon {
+            color: #ff9800;
+            font-size: 5em;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #f57c00;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+            margin-bottom: 30px;
+        }
+        .expired-section {
+            background-color: #fff3e0;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 25px 0;
+            border-left: 4px solid #ff9800;
+            text-align: left;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .info-item {
+            padding: 15px;
+            background-color: rgba(255,255,255,0.7);
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+        .info-label {
+            font-weight: 600;
+            color: #555;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            font-size: 14px;
+            color: #333;
+        }
+        .expired-value {
+            color: #f57c00;
+            font-weight: 600;
+        }
+        .help-section {
+            background-color: #e8f5e8;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #4caf50;
+            text-align: left;
+        }
+        .help-section h3 {
+            color: #2e7d32;
+            margin-top: 0;
+        }
+        .button {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }
+        .button:hover {
+            background-color: #1557b0;
+            transform: translateY(-1px);
+        }
+        .button-secondary {
+            background-color: #6c757d;
+        }
+        .button-secondary:hover {
+            background-color: #545b62;
+        }
+        .security-note {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            border-left: 4px solid #2196f3;
+            text-align: left;
+            font-size: 14px;
+        }
+        .security-note h4 {
+            color: #1976d2;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .timeline {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            border: 1px solid #e0e0e0;
+        }
+        .timeline-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        .timeline-icon {
+            margin-right: 10px;
+            width: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="expired-icon">⏰</div>
+        <h1>Token Expired</h1>
+        <div class="subtitle">This export token has passed its expiration date and is no longer valid</div>
+
+        <div class="expired-section">
+            <h3>⏳ Token Information</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Status</div>
+                    <div class="info-value expired-value">⚠️ EXPIRED</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Expired On</div>
+                    <div class="info-value expired-value">{{ token_info.expires_at }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Created</div>
+                    <div class="info-value">{{ token_info.created_at }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Total Uses</div>
+                    <div class="info-value">{{ token_info.access_count }} times</div>
+                </div>
+            </div>
+            
+            <div class="timeline">
+                <h4 style="margin-top: 0; color: #666;">Token Lifecycle:</h4>
+                <div class="timeline-item">
+                    <span class="timeline-icon">✅</span>
+                    <span>Created: {{ token_info.created_at }}</span>
+                </div>
+                <div class="timeline-item">
+                    <span class="timeline-icon">📊</span>
+                    <span>Used {{ token_info.access_count }} times</span>
+                </div>
+                <div class="timeline-item">
+                    <span class="timeline-icon">⏰</span>
+                    <span style="color: #f57c00; font-weight: 600;">Expired: {{ token_info.expires_at }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="security-note">
+            <h4>🔒 Why Do Tokens Expire?</h4>
+            <p>Export tokens have expiration dates for security reasons:</p>
+            <ul>
+                <li><strong>Data Protection:</strong> Limits exposure if a URL is accidentally shared</li>
+                <li><strong>Access Control:</strong> Ensures you have control over who can access your data</li>
+                <li><strong>Privacy:</strong> Reduces the risk of long-term unauthorized access</li>
+            </ul>
+        </div>
+
+        <div class="help-section">
+            <h3>💡 What You Can Do</h3>
+            <p><strong>1. Create a New Token:</strong></p>
+            <p>You can easily create a new export token through the OAuth flow. This will give you fresh URLs that work immediately.</p>
+            
+            <p><strong>2. Choose Your Expiration:</strong></p>
+            <p>When creating a new token, you can select how long it should remain valid (7, 30, 90, or 365 days).</p>
+            
+            <p><strong>3. Save Your URLs:</strong></p>
+            <p>After creating a token, bookmark or save the export URLs for easy access during the validity period.</p>
+        </div>
+
+        <div style="margin-top: 30px;">
+            <a href="/oauth" class="button">🔑 Create New Token</a>
+            <a href="/" class="button button-secondary">🏠 Back to Home</a>
+        </div>
+
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 6px; text-align: left; font-size: 14px; color: #666;">
+                <h4 style="margin-top: 0; color: #333;">💭 Need Help?</h4>
+                <p style="margin-bottom: 0;">
+                    The OAuth flow is quick and secure - it only takes a few clicks to get new export URLs. 
+                    Your Google account permissions remain the same, and you maintain full control over your data access.
+                </p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

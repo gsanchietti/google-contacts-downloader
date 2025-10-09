@@ -1,15 +1,16 @@
-# Google Contacts Downloader
+# Oauth Contacts and calendar exporter
 
-A **multi-tenant** Flask-based HTTP service that allows multiple users to authenticate and download their Google Contacts using the People API. Each user gets their own secure token storage, and the service can serve multiple clients simultaneously.
+A **multi-tenant** Flask-based HTTP service that allows multiple users to authenticate and download their Google Contacts and Calendar data. Each user gets their own secure token storage, and the service can serve multiple clients simultaneously.
 
 ## Key Features
 
 ✅ **Multi-Tenant Architecture** - Multiple users can authenticate independently  
 ✅ **SQLite Database Storage** - Secure token and credentials storage in SQLite database  
+✅ **Google Contacts Export** - Download contacts in CSV or JSON format  
+✅ **Google Calendar Export** - Download calendar events in ICS format  
 ✅ **Bearer Token Authentication** - JWT-like access token system for API security  
 ✅ **Concurrent OAuth Flows** - Multiple users can authenticate simultaneously  
 ✅ **Auto Token Refresh** - Tokens are automatically refreshed when expired  
-✅ **Multiple Export Formats** - CSV and JSON output formats  
 ✅ **RESTful API** - Simple HTTP endpoints for all operations  
 ✅ **User-Friendly OAuth** - Browser-optimized OAuth flow with copy-paste token interface
 ✅ **Beautiful Web Interface** - Professional index page with service overview and quick start guide
@@ -24,7 +25,7 @@ The service authenticates each user with Google using OAuth 2.0, stores their cr
 2. User authorizes via Google → Service identifies user by email
 3. Credentials saved to SQLite database
 4. User receives Bearer access token
-5. User downloads contacts via `/download` with Authorization header
+5. User downloads contacts via `/download/contacts` with Authorization header
 
 ## Quick Start
 
@@ -44,9 +45,12 @@ curl http://localhost:5000/auth | jq -r '.authorization_url'
 # 5. Open the URL in a browser and authorize
 
 # 6. Download contacts using the access token from step 5
-curl -H "Authorization: Bearer <access_token>" "http://localhost:5000/download?format=json" > contacts.json
+curl -H "Authorization: Bearer <access_token>" "http://localhost:5000/download/contacts?format=json" > contacts.json
 
-# 7. View privacy policy (optional)
+# 7. Download calendar using the access token from step 5
+curl -H "Authorization: Bearer <access_token>" "http://localhost:5000/download/calendar" > calendar.ics
+
+# 8. View privacy policy (optional)
 curl http://localhost:5000/privacy_policy
 ```
 
@@ -67,8 +71,8 @@ curl http://localhost:8000/auth | jq -r '.authorization_url'
 # Opens URL, completes OAuth → gets access_token_2
 
 # Both download their contacts independently
-curl -H "Authorization: Bearer $access_token_1" "http://localhost:8000/download?format=csv" > employee1_contacts.csv
-curl -H "Authorization: Bearer $access_token_2" "http://localhost:8000/download?format=json" > employee2_contacts.json
+curl -H "Authorization: Bearer $access_token_1" "http://localhost:8000/download/contacts?format=csv" > employee1_contacts.csv
+curl -H "Authorization: Bearer $access_token_2" "http://localhost:8000/download/contacts?format=json" > employee2_contacts.json
 
 # Admin monitors all users
 curl http://localhost:8000/metrics | grep gcd_registered_users_total
@@ -84,8 +88,8 @@ POST /oauth2callback → access_token_A
 POST /oauth2callback → access_token_B  
 
 # Each customer downloads only their own data
-curl -H "Authorization: Bearer $access_token_A" /download → Customer A's contacts
-curl -H "Authorization: Bearer $access_token_B" /download → Customer B's contacts
+curl -H "Authorization: Bearer $access_token_A" /download/contacts → Customer A's contacts
+curl -H "Authorization: Bearer $access_token_B" /download/contacts → Customer B's contacts
 
 # Tokens are isolated - Customer A cannot access Customer B's data
 ```
@@ -116,6 +120,7 @@ pip install -r requirements.txt
    - Provide the application name, support email, and developer contact information.
    - **Add these required scopes:**
      - `https://www.googleapis.com/auth/contacts.readonly` (for reading contacts)
+     - `https://www.googleapis.com/auth/calendar.readonly` (for reading calendar)
      - `https://www.googleapis.com/auth/userinfo.email` (for user identification)
      - `openid` (automatically included with userinfo.email)
    - Add yourself (or intended users) as test users if using the External type and you have not published the app.
@@ -284,7 +289,7 @@ Handles the OAuth callback after user authorization. Saves user-specific token.
   "status": "success",
   "user_email": "user@gmail.com",
   "access_token": "AbCdEf123...",
-  "next_steps": "Use the access_token in Authorization header: 'Bearer <token>' to call /download"
+  "next_steps": "Use the access_token in Authorization header: 'Bearer <token>' to call /download/contacts"
 }
 ```
 
@@ -304,7 +309,7 @@ Both JSON and HTML error responses are provided for various OAuth failures:
 
 ---
 
-#### GET /download?format=<csv|json>
+#### GET /download/contacts?format=<csv|json>
 Downloads contacts for the authenticated user. **Requires authentication.**
 
 **Headers:**
@@ -315,11 +320,180 @@ Downloads contacts for the authenticated user. **Requires authentication.**
 
 **Example:**
 ```bash
-curl -H "Authorization: Bearer your_access_token" "http://localhost:5000/download?format=json"
+curl -H "Authorization: Bearer your_access_token" "http://localhost:5000/download/contacts?format=json"
 ```
 
 **CSV Response:** Returns CSV data with `Content-Type: text/csv`  
 **JSON Response:** Returns JSON with user_email, total_contacts, and contacts array
+
+---
+
+#### GET /download/calendar
+Downloads calendar events for the authenticated user in ICS format. **Requires authentication and calendar scope.**
+
+**Headers:**
+- `Authorization: Bearer <access_token>` (required)
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer your_access_token" "http://localhost:5000/download/calendar" -o calendar.ics
+```
+
+**Response:** Returns ICS calendar file with `Content-Type: text/calendar`
+
+**Use Cases:**
+- Export calendar for backup purposes
+- Import events into other calendar applications (Outlook, Apple Calendar, etc.)
+- Integrate with calendar management tools
+- Create calendar snapshots for record keeping
+
+---
+
+#### POST /export-token
+Create a secret export token for public data access. **Requires authentication.**
+
+**Headers:**
+- `Authorization: Bearer <access_token>` (required)
+- `Content-Type: application/json` (optional)
+
+**Request Body (optional JSON):**
+```json
+{
+  "expires_days": 30
+}
+```
+
+**Parameters:**
+- `expires_days` (optional): Expiration in days (1-365, default: 30)
+
+**Response:**
+```json
+{
+  "export_token": "ABC123...",
+  "calendar_export_url": "https://your-domain/export/calendar/ABC123....ics",
+  "contacts_export_url": "https://your-domain/export/contacts/ABC123....csv",
+  "expires_at": "2025-11-07T12:00:00Z",
+  "expires_days": 30,
+  "instructions": [
+    "Keep these URLs secret - anyone with access can download your calendar and contacts",
+    "This token works for both calendar (.ics) and contacts (.csv) exports",
+    "The URLs will expire automatically after the specified time",
+    "You can revoke the token at any time using the /export-token/revoke endpoint",
+    "Access attempts are logged for security monitoring"
+  ],
+  "security_notes": [
+    "Use HTTPS in production to protect the secret URLs",
+    "Consider shorter expiry times for sensitive data",
+    "Monitor access logs for unexpected usage"
+  ]
+}
+```
+
+**Examples:**
+```bash
+# Create export token with custom expiration
+curl -X POST \
+     -H "Authorization: Bearer <your_token>" \
+     -H "Content-Type: application/json" \
+     -d '{"expires_days": 7}' \
+     "http://localhost:8000/export-token"
+
+# Default token (30 days expiration)
+curl -X POST \
+     -H "Authorization: Bearer <your_token>" \
+     "http://localhost:8000/export-token"
+```
+
+---
+
+#### GET /export/calendar/{token}.ics
+**Public endpoint** - Download calendar using secret export token. **No authentication required.**
+
+**Parameters:**
+- `{token}` - The secret export token from `/export-token`
+
+**Response:** ICS file download with `Content-Type: text/calendar`
+
+**Example:**
+```bash
+# Use the export_url from the token creation response
+curl "https://your-domain/export/calendar/ABC123xyz....ics" -o calendar.ics
+```
+
+**Security Features:**
+- Tokens are cryptographically secure (32-byte URL-safe)
+- Only hashed versions stored in database
+- Automatic expiration (configurable 1-365 days)
+- Access logging and counting
+- Revocable at any time
+
+**Use Cases:**
+- Share calendar with external systems without OAuth
+- Integrate with monitoring or backup systems
+- Provide calendar feeds to calendar aggregators
+- Create public calendar subscriptions
+
+---
+
+#### GET /export/contacts/{token}.csv
+**Public endpoint** - Download contacts using secret export token. **No authentication required.**
+
+**Parameters:**
+- `{token}` - The secret export token from `/export-token`
+
+**Response:** CSV file download with `Content-Type: text/csv`
+
+**Example:**
+```bash
+# Use the contacts_export_url from the token creation response
+curl "https://your-domain/export/contacts/ABC123xyz....csv" -o contacts.csv
+```
+
+**Security Features:**
+- Tokens are cryptographically secure (32-byte URL-safe)
+- Only hashed versions stored in database
+- Automatic expiration (configurable 1-365 days)
+- Access logging and counting
+- Revocable at any time
+
+**Use Cases:**
+- Share contacts with external systems without OAuth
+- Integrate with CRM or backup systems
+- Provide contact feeds to directory services
+- Create automated contact synchronization
+
+---
+
+#### POST /export-token/revoke
+Revoke an export token. **Requires authentication.**
+
+**Headers:**
+- `Authorization: Bearer <access_token>` (required)
+- `Content-Type: application/json` (required)
+
+**Request Body:**
+```json
+{
+  "token": "ABC123..."
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Export token revoked successfully",
+  "revoked": true
+}
+```
+
+**Example:**
+```bash
+curl -X POST \
+     -H "Authorization: Bearer <your_token>" \
+     -H "Content-Type: application/json" \
+     -d '{"token": "ABC123..."}' \
+     "http://localhost:8000/export-token/revoke"
+```
 
 ---
 
@@ -512,14 +686,14 @@ ACCESS_TOKEN="your_access_token_here"
 curl -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:5000/me | jq .
 
 # Get contacts as JSON
-curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download?format=json" | jq '.contacts[0]'
+curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download/contacts?format=json" | jq '.contacts[0]'
 
 # Get contacts as CSV
-curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download?format=csv" | head -5
+curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download/contacts?format=csv" | head -5
 
 # Save to file
-curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download?format=json" > contacts.json
-curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download?format=csv" > contacts.csv
+curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download/contacts?format=json" > contacts.json
+curl -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:5000/download/contacts?format=csv" > contacts.csv
 
 # Revoke token when done
 curl -X POST -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:5000/token/revoke
@@ -588,7 +762,7 @@ Request details: redirect_uri=http://localhost:5000/oauth2callback
 
 ### CSV Output
 
-The `/download?format=csv` endpoint returns CSV data with the following columns:
+The `/download/contacts?format=csv` endpoint returns CSV data with the following columns:
 
 - Full Name, Given Name, Family Name, Nickname
 - Primary Email, Other Emails
@@ -602,7 +776,7 @@ Missing information is left blank. Multi-value fields are concatenated with `; `
 
 ### JSON Output
 
-The `/download?format=json` endpoint returns a JSON array of contact objects. Each object contains the same fields as the CSV columns, with field names as keys and contact data as string values.
+The `/download/contacts?format=json` endpoint returns a JSON array of contact objects. Each object contains the same fields as the CSV columns, with field names as keys and contact data as string values.
 
 Example JSON structure:
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authorization Successful - Google Contacts Downloader</title>
+    <title>Authorization Successful - Oauth Contacts and calendar exporter</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -147,6 +147,106 @@
             color: #f57c00;
             margin-right: 8px;
         }
+        .export-token-section {
+            background-color: #f0f8ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #1a73e8;
+        }
+        .button-container {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+        .action-btn {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .action-btn:hover {
+            background-color: #1557b0;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .action-btn:active {
+            transform: translateY(0);
+        }
+        .action-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .revoke-btn {
+            background-color: #ea4335;
+        }
+        .revoke-btn:hover:not(:disabled) {
+            background-color: #d33b2c;
+        }
+        .export-urls {
+            margin-top: 20px;
+        }
+        .url-container {
+            margin: 15px 0;
+            position: relative;
+        }
+        .url-label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 14px;
+        }
+        .url-container:hover .url-input:not(:placeholder-shown) {
+            background-color: #e8f0fe;
+        }
+        .url-input {
+            width: 100%;
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            border: 1px solid #dadce0;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            word-break: break-all;
+            transition: background-color 0.3s;
+        }
+        .url-input:focus {
+            background-color: #e3f2fd;
+            border-color: #1a73e8;
+            outline: none;
+        }
+        .url-input:placeholder-shown {
+            font-style: italic;
+            color: #999;
+        }
+        .status-message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .loading {
+            opacity: 0.6;
+        }
     </style>
 </head>
 <body>
@@ -154,14 +254,64 @@
         <div class="success-header">
             <div class="success-icon">✅</div>
             <h1>Authorization Successful!</h1>
-            <p>Your Google account has been successfully connected to Google Contacts Downloader.</p>
+            <p>Your Google account has been successfully connected to Oauth Contacts and calendar exporter (Google).</p>
         </div>
 
         <div class="user-info">
             <strong>Authorized Account:</strong> {{ user_email }}
         </div>
 
-        <div class="warning">
+        <div class="export-token-section">
+            <h3>🔗 Create Public Export URLs</h3>
+            <p>Generate secure, shareable URLs for both your calendar and contacts data:</p>
+            
+            <div class="button-container">
+                <button class="action-btn" onclick="createExportUrls()" id="createBtn">
+                    🚀 Create Export URLs
+                </button>
+                <button class="action-btn revoke-btn" onclick="revokeToken()" id="revokeBtn" disabled>
+                    🗑️ Revoke URLs
+                </button>
+            </div>
+            
+            <div id="statusMessage"></div>
+            
+            <div id="exportUrls" class="export-urls">
+                <div class="url-container">
+                    <div class="url-label">📅 Calendar Export URL (.ics):</div>
+                    <input type="text" class="url-input" id="calendarUrl" readonly placeholder="Click 'Create Export URLs' to generate...">
+                </div>
+                <div class="url-container">
+                    <div class="url-label">👥 Contacts Export URL (.csv):</div>
+                    <input type="text" class="url-input" id="contactsUrl" readonly placeholder="Click 'Create Export URLs' to generate...">
+                </div>
+                <div style="margin-top: 15px; padding: 12px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                    <strong>⚠️ Security Note:</strong> Keep these URLs secret - anyone with access can download your data!<br>
+                    <small style="color: #856404;">URLs expire automatically after 30 days. You can revoke them anytime.</small>
+                </div>
+            </div>
+            
+            <div id="managementSection" class="export-token-section" style="display: none;">
+                <h3>🛠️ Token Management</h3>
+                <p>Manage your export token and URLs through the web interface:</p>
+                
+                <div class="button-container">
+                    <button class="action-btn" onclick="openManagement()" id="manageBtn">
+                        🔧 Manage Token & URLs
+                    </button>
+                </div>
+                
+                <div style="margin-top: 15px; padding: 12px; background-color: #e8f5e8; border-left: 4px solid #4caf50; border-radius: 4px; font-size: 14px;">
+                    <strong>💡 Management Features:</strong><br>
+                    • View detailed token information and statistics<br>
+                    • Copy export URLs with one click<br>
+                    • Revoke individual tokens or all tokens at once<br>
+                    • Monitor token usage and access history
+                </div>
+            </div>
+        </div>
+
+            <div class="warning">
             <span class="warning-icon">⚠️</span>
             <strong>Important:</strong> Keep your access token secure and don't share it with others. It provides access to your Google Contacts.
         </div>
@@ -182,46 +332,54 @@
             
             <div class="code-example">
 curl -H "Authorization: Bearer <span class="highlight">{{ access_token }}</span>" \<br>
-     "https://{{ host }}/download?format=json" > contacts.json
+     "https://{{ host }}/download/contacts?format=json" > contacts.json
             </div>
 
             <div class="code-example">
 curl -H "Authorization: Bearer <span class="highlight">{{ access_token }}</span>" \<br>
-     "https://{{ host }}/download?format=csv" > contacts.csv
+     "https://{{ host }}/download/contacts?format=csv" > contacts.csv
+            </div>
+
+            <div class="code-example">
+curl -H "Authorization: Bearer <span class="highlight">{{ access_token }}</span>" \<br>
+     "https://{{ host }}/download/calendar" > calendar.ics
             </div>
         </div>
 
         <div class="next-steps">
-            <h3>Next Steps</h3>
+            <h3>What's Next?</h3>
             
             <div class="step">
-                <strong>Download your contacts</strong><br>
-                Use the curl commands above or integrate with your application
+                <strong>Create public export URLs</strong><br>
+                Use the button above to generate secure URLs for sharing your calendar and contacts
             </div>
             
             <div class="step">
-                <strong>Check your user info</strong><br>
-                <code>curl -H "Authorization: Bearer {{ access_token }}" http://{{ host }}/me</code>
+                <strong>Download your data directly</strong><br>
+                <code>curl -H "Authorization: Bearer {{ access_token }}" https://{{ host }}/download/contacts?format=csv</code><br>
+                <code>curl -H "Authorization: Bearer {{ access_token }}" https://{{ host }}/download/calendar</code>
             </div>
             
             <div class="step">
-                <strong>View available formats</strong><br>
-                Choose between <code>format=json</code> or <code>format=csv</code> for downloads
+                <strong>Share with external systems</strong><br>
+                Use the generated public URLs to integrate with CRM, backup systems, or calendar apps
             </div>
             
             <div class="step">
-                <strong>Revoke access when done</strong><br>
-                <code>curl -X POST -H "Authorization: Bearer {{ access_token }}" http://{{ host }}/token/revoke</code>
+                <strong>Monitor and manage</strong><br>
+                URLs expire automatically after 30 days. Revoke anytime for security.
             </div>
         </div>
 
         <div class="footer">
-            <p>Google Contacts Downloader - Secure, read-only access to your Google Contacts</p>
+            <p>Oauth Contacts and calendar exporter - Secure, read-only access to your Google Contacts and Calendar</p>
             <p><a href="/privacy_policy" target="_blank">Privacy Policy & Terms of Service</a></p>
         </div>
     </div>
 
     <script>
+        let currentExportToken = null;
+        
         function copyToken() {
             const tokenInput = document.getElementById('accessToken');
             const copyBtn = document.querySelector('.copy-btn');
@@ -255,6 +413,170 @@ curl -H "Authorization: Bearer <span class="highlight">{{ access_token }}</span>
         // Auto-select token on click
         document.getElementById('accessToken').addEventListener('click', function() {
             this.select();
+        });
+        
+        // Export token functions
+        function showStatus(message, isError = false) {
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.innerHTML = `<div class="status-message ${isError ? 'status-error' : 'status-success'}">${message}</div>`;
+        }
+        
+        function clearStatus() {
+            document.getElementById('statusMessage').innerHTML = '';
+        }
+        
+        function setButtonsLoading(loading) {
+            const buttons = document.querySelectorAll('.action-btn');
+            buttons.forEach(btn => {
+                btn.disabled = loading;
+                if (loading) {
+                    btn.classList.add('loading');
+                } else {
+                    btn.classList.remove('loading');
+                }
+            });
+        }
+        
+        async function createExportUrls() {
+            clearStatus();
+            setButtonsLoading(true);
+            
+            try {
+                const response = await fetch('/export-token', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer {{ access_token }}',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        expires_days: 30
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    currentExportToken = data.export_token;
+                    
+                    // Update URLs in the inputs
+                    const calendarUrl = document.getElementById('calendarUrl');
+                    const contactsUrl = document.getElementById('contactsUrl');
+                    const exportUrls = document.getElementById('exportUrls');
+                    
+                    calendarUrl.value = data.calendar_export_url || 'Not available';
+                    contactsUrl.value = data.contacts_export_url || 'Not available';
+                    
+                    // Show the URLs section
+                    exportUrls.style.display = 'block';
+                    
+                    // Show management section
+                    document.getElementById('managementSection').style.display = 'block';
+                    
+                    // Enable revoke button and update create button text
+                    document.getElementById('revokeBtn').disabled = false;
+                    document.getElementById('createBtn').textContent = '🔄 Regenerate URLs';
+                    
+                    showStatus(`✅ Export URLs created successfully! Valid for ${data.expires_days} days.`);
+                } else {
+                    showStatus(`❌ Failed to create export URLs: ${data.error}`, true);
+                }
+            } catch (error) {
+                showStatus(`❌ Network error: ${error.message}`, true);
+            } finally {
+                setButtonsLoading(false);
+            }
+        }
+        
+        async function revokeToken() {
+            if (!currentExportToken) {
+                showStatus('❌ No URLs to revoke', true);
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to revoke the export URLs? This will invalidate both calendar and contacts URLs.')) {
+                return;
+            }
+            
+            clearStatus();
+            setButtonsLoading(true);
+            
+            try {
+                const response = await fetch('/export-token/revoke', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer {{ access_token }}',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        token: currentExportToken
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Reset UI state
+                    const calendarUrl = document.getElementById('calendarUrl');
+                    const contactsUrl = document.getElementById('contactsUrl');
+                    
+                    calendarUrl.value = '';
+                    calendarUrl.placeholder = 'Click \'Create Export URLs\' to generate...';
+                    contactsUrl.value = '';
+                    contactsUrl.placeholder = 'Click \'Create Export URLs\' to generate...';
+                    
+                    document.getElementById('exportUrls').style.display = 'block';  // Keep visible but empty
+                    document.getElementById('managementSection').style.display = 'none';  // Hide management section
+                    document.getElementById('revokeBtn').disabled = true;
+                    document.getElementById('createBtn').textContent = '🚀 Create Export URLs';
+                    currentExportToken = null;
+                    
+                    showStatus('✅ Export URLs revoked successfully. All URLs are now invalid.');
+                } else {
+                    showStatus(`❌ Failed to revoke URLs: ${data.error}`, true);
+                }
+            } catch (error) {
+                showStatus(`❌ Network error: ${error.message}`, true);
+            } finally {
+                setButtonsLoading(false);
+            }
+        }
+        
+        function openManagement() {
+            if (!currentExportToken) {
+                showStatus('❌ No token to manage', true);
+                return;
+            }
+            
+            // Open management interface in new tab
+            const managementUrl = `/manage/${currentExportToken}`;
+            window.open(managementUrl, '_blank');
+        }
+        
+        // Auto-select and copy URL inputs on click
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlInputs = document.querySelectorAll('.url-input');
+            urlInputs.forEach(input => {
+                input.addEventListener('click', function() {
+                    if (this.value && this.value !== '' && !this.value.includes('Click')) {
+                        this.select();
+                        // Try to copy to clipboard
+                        try {
+                            document.execCommand('copy');
+                            showStatus(`📋 URL copied to clipboard!`);
+                            setTimeout(clearStatus, 2000);
+                        } catch (err) {
+                            // Fallback - just select the text
+                            this.select();
+                        }
+                    }
+                });
+                
+                input.addEventListener('focus', function() {
+                    if (this.value && this.value !== '' && !this.value.includes('Click')) {
+                        this.select();
+                    }
+                });
+            });
         });
     </script>
 </body>

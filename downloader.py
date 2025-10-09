@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Google Contacts Downloader - Multi-tenant HTTP Service
+"""Oauth Contacts and calendar exporter - Multi-tenant HTTP Service
 
-This service allows multiple users to authenticate and download their Google Contacts.
-Each user gets their own token file stored securely in the tokens directory.
+This service allows multiple users to authenticate and download their Google Contacts and Calendar events.
+Supported providers:
+ - Google (implemented)
+ - Microsoft (planned)
+
+Each user gets their own token stored securely in the database. Tokens are encrypted at rest.
 """
 
 from __future__ import annotations
@@ -16,8 +20,9 @@ import secrets
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
 
@@ -27,6 +32,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from icalendar import Calendar, Event
+from datetime import datetime, timezone
+import dateutil.parser
 
 # Allow HTTP for local development (disable HTTPS requirement)
 # WARNING: Only use this for local development, never in production!
@@ -83,10 +91,11 @@ ENCRYPTION_WARNINGS_TOTAL = Counter(
     'Number of times default encryption key warning was shown'
 )
 
-# Default OAuth scopes: read-only access to contacts + user profile for email identification
+# Default OAuth scopes: read-only access to contacts, calendar + user profile for email identification
 # Note: openid is automatically added when using userinfo.email scope
 DEFAULT_SCOPES = [
     "https://www.googleapis.com/auth/contacts.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/userinfo.email",
     "openid"
 ]
@@ -221,6 +230,20 @@ def init_database(config: Config) -> None:
             )
         ''')
         
+        # Create table for export tokens (public calendar access)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS export_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_email TEXT NOT NULL,
+                token_type TEXT NOT NULL DEFAULT 'calendar',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                access_count INTEGER DEFAULT 0,
+                last_accessed TIMESTAMP,
+                FOREIGN KEY (user_email) REFERENCES user_tokens (user_email) ON DELETE CASCADE
+            )
+        ''')
+        
         # Create index for faster lookups
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_access_tokens_user_email 
@@ -231,6 +254,12 @@ def init_database(config: Config) -> None:
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_oauth_flows_created_at 
             ON oauth_flows (created_at)
+        ''')
+        
+        # Create index for export tokens cleanup
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_export_tokens_expires 
+            ON export_tokens (expires_at)
         ''')
         
         conn.commit()
@@ -364,6 +393,152 @@ def delete_oauth_flow(config: Config, state: str) -> None:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM oauth_flows WHERE state = ?", (state,))
         conn.commit()
+
+
+# Export token functions for public calendar access
+def generate_export_token() -> str:
+    """Generate a cryptographically secure export token."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_export_token(token: str) -> str:
+    """Hash export token for secure storage."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_export_token(config: Config, user_email: str, token_type: str = 'calendar', expires_days: int = 30) -> str:
+    """Create a new export token for public access."""
+    token = generate_export_token()
+    token_hash = hash_export_token(token)
+    expires_at = datetime.utcnow() + timedelta(days=expires_days)
+    
+    try:
+        with get_database_connection(config) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO export_tokens (token_hash, user_email, token_type, expires_at)
+                VALUES (?, ?, ?, ?)
+            """, (token_hash, user_email, token_type, expires_at.isoformat()))
+            conn.commit()
+            
+        print(f"✅ Created export token for user {user_email} (type: {token_type}, expires: {expires_at.isoformat()})")
+        return token
+        
+    except Exception as e:
+        print(f"❌ Failed to create export token: {e}")
+        raise RuntimeError(f"Failed to create export token: {e}")
+
+
+def validate_export_token(config: Config, token: str) -> Tuple[str, str] | None:
+    """Validate export token and return (user_email, token_type) if valid."""
+    token_hash = hash_export_token(token)
+    
+    try:
+        with get_database_connection(config) as conn:
+            cursor = conn.cursor()
+            # Update access count and timestamp, check expiry
+            cursor.execute("""
+                UPDATE export_tokens 
+                SET access_count = access_count + 1, last_accessed = CURRENT_TIMESTAMP
+                WHERE token_hash = ? AND expires_at > CURRENT_TIMESTAMP
+            """, (token_hash,))
+            
+            if cursor.rowcount > 0:
+                # Get the token details
+                result = cursor.execute("""
+                    SELECT user_email, token_type FROM export_tokens 
+                    WHERE token_hash = ?
+                """, (token_hash,)).fetchone()
+                conn.commit()
+                
+                if result:
+                    return result[0], result[1]
+            
+        return None
+        
+    except Exception as e:
+        print(f"❌ Failed to validate export token: {e}")
+        return None
+
+
+def revoke_export_token(config: Config, token: str) -> bool:
+    """Revoke an export token."""
+    token_hash = hash_export_token(token)
+    
+    try:
+        with get_database_connection(config) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM export_tokens WHERE token_hash = ?", (token_hash,))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    except Exception as e:
+        print(f"❌ Failed to revoke export token: {e}")
+        return False
+
+
+def cleanup_expired_tokens(config: Config) -> None:
+    """Clean up expired export tokens."""
+    try:
+        with get_database_connection(config) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM export_tokens WHERE expires_at <= CURRENT_TIMESTAMP")
+            deleted_count = cursor.rowcount
+            conn.commit()
+            
+            if deleted_count > 0:
+                print(f"🧹 Cleaned up {deleted_count} expired export tokens")
+                
+    except Exception as e:
+        print(f"⚠️  Warning: Failed to cleanup expired tokens: {e}")
+
+
+def get_export_token_info(config: Config, token: str) -> Optional[Dict]:
+    """Get export token information including user data and access statistics."""
+    token_hash = hash_export_token(token)
+    
+    try:
+        with get_database_connection(config) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT user_email, token_type, created_at, expires_at, 
+                       access_count, last_accessed
+                FROM export_tokens 
+                WHERE token_hash = ?
+            """, (token_hash,))
+            
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'user_email': row['user_email'],
+                    'token_type': row['token_type'],
+                    'created_at': row['created_at'],
+                    'expires_at': row['expires_at'],
+                    'access_count': row['access_count'] or 0,
+                    'last_accessed': row['last_accessed'],
+                    'is_expired': row['expires_at'] <= datetime.utcnow().isoformat()
+                }
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ Failed to get export token info: {e}")
+        return None
+
+
+def revoke_all_user_tokens(config: Config, user_email: str) -> int:
+    """Revoke all export tokens for a specific user."""
+    try:
+        with get_database_connection(config) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM export_tokens WHERE user_email = ?", (user_email,))
+            deleted_count = cursor.rowcount
+            conn.commit()
+            return deleted_count
+            
+    except Exception as e:
+        print(f"❌ Failed to revoke all user tokens: {e}")
+        return 0
 
 
 def get_redirect_uri() -> str:
@@ -670,6 +845,105 @@ except Exception as e:
     print("Will attempt to initialize on first request")
 
 
+def fetch_google_calendar(credentials) -> str:
+    """Fetch Google Calendar events and return as ICS format"""
+    try:
+        service = build('calendar', 'v3', credentials=credentials)
+        
+        # Get primary calendar events (future events only)
+        now = datetime.utcnow().isoformat() + 'Z'  # 'Z' indicates UTC time
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=now,
+            maxResults=1000,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        
+        # Create ICS calendar
+        cal = Calendar()
+        cal.add('prodid', '-//Oauth Contacts and calendar exporter//Calendar Export//EN')
+        cal.add('version', '2.0')
+        cal.add('calscale', 'GREGORIAN')
+        cal.add('method', 'PUBLISH')
+        cal.add('x-wr-calname', 'Google Calendar Export')
+        cal.add('x-wr-timezone', 'UTC')
+
+        for event_data in events:
+            event = Event()
+            
+            # Required fields
+            event.add('uid', event_data.get('id', ''))
+            event.add('summary', event_data.get('summary', 'No Title'))
+            
+            # Start time
+            start = event_data.get('start', {})
+            if 'dateTime' in start:
+                start_dt = dateutil.parser.parse(start['dateTime'])
+                event.add('dtstart', start_dt)
+            elif 'date' in start:
+                # All-day event
+                start_date = dateutil.parser.parse(start['date']).date()
+                event.add('dtstart', start_date)
+                event.add('x-microsoft-cdo-alldayevent', 'TRUE')
+            
+            # End time
+            end = event_data.get('end', {})
+            if 'dateTime' in end:
+                end_dt = dateutil.parser.parse(end['dateTime'])
+                event.add('dtend', end_dt)
+            elif 'date' in end:
+                # All-day event
+                end_date = dateutil.parser.parse(end['date']).date()
+                event.add('dtend', end_date)
+            
+            # Optional fields
+            if 'description' in event_data:
+                event.add('description', event_data['description'])
+            
+            if 'location' in event_data:
+                event.add('location', event_data['location'])
+            
+            if 'created' in event_data:
+                created_dt = dateutil.parser.parse(event_data['created'])
+                event.add('created', created_dt)
+            
+            if 'updated' in event_data:
+                updated_dt = dateutil.parser.parse(event_data['updated'])
+                event.add('last-modified', updated_dt)
+            
+            # Status
+            status = event_data.get('status', 'confirmed').upper()
+            event.add('status', status)
+            
+            # Transparency
+            transparency = event_data.get('transparency', 'opaque').upper()
+            event.add('transp', transparency)
+            
+            # Organizer
+            organizer = event_data.get('organizer', {})
+            if 'email' in organizer:
+                event.add('organizer', f"mailto:{organizer['email']}")
+            
+            # Attendees
+            attendees = event_data.get('attendees', [])
+            for attendee in attendees:
+                if 'email' in attendee:
+                    attendee_str = f"mailto:{attendee['email']}"
+                    if 'displayName' in attendee:
+                        attendee_str = f"{attendee['displayName']} <{attendee['email']}>"
+                    event.add('attendee', attendee_str)
+            
+            cal.add_component(event)
+
+        return cal.to_ical().decode('utf-8')
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch calendar: {str(e)}")
+
+
 @app.route('/')
 def index():
     """Home page with service overview and quick start guide."""
@@ -836,7 +1110,7 @@ def oauth2callback():
                 "user_email": user_email,
                 "access_token": access_token,
                 "token_saved_to": "database",
-                "next_steps": "Use the access_token in Authorization header: 'Bearer <token>' to call /download"
+                "next_steps": "Use the access_token in Authorization header: 'Bearer <token>' to call /download/contacts"
             })
         else:
             # Browser request - return HTML page
@@ -898,8 +1172,8 @@ def oauth2callback():
                                  troubleshooting=troubleshooting), 400
 
 
-@app.route('/download')
-def download():
+@app.route('/download/contacts')
+def download_contacts_endpoint():
     """Download contacts for the authenticated user in specified format."""
     config = get_config()
     format_param = request.args.get('format', 'csv').lower()
@@ -910,7 +1184,7 @@ def download():
         return jsonify({
             "error": "Authentication required",
             "solution": "Include 'Authorization: Bearer <access_token>' header",
-            "example": "curl -H 'Authorization: Bearer your_access_token' http://localhost:5000/download?format=json"
+            "example": "curl -H 'Authorization: Bearer your_access_token' http://localhost:5000/download/contacts?format=json"
         }), 401
 
     if format_param not in ['csv', 'json']:
@@ -968,6 +1242,524 @@ def download():
     except Exception as e:
         DOWNLOADS_TOTAL.labels(format=format_param, status='error').inc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/download/calendar')
+def download_calendar():
+    """Download user's Google Calendar in ICS format"""
+    HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="download_calendar", status_code="200").inc()
+    
+    config = get_config()
+    
+    # Authenticate user
+    user_email = authenticate_request()
+    if not user_email:
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="download_calendar", status_code="401").inc()
+        return jsonify({
+            "error": "Authentication required",
+            "troubleshooting": {
+                "details": "Missing or invalid Authorization header",
+                "error_type": "authentication_error", 
+                "solution": "Provide valid Bearer token in Authorization header"
+            }
+        }), 401
+
+    try:
+        # Load user credentials
+        credentials = load_user_credentials(config, user_email)
+        if not credentials:
+            return jsonify({
+                "error": "User not authenticated with Google",
+                "troubleshooting": {
+                    "details": f"No stored credentials found for user {user_email}",
+                    "error_type": "no_credentials",
+                    "solution": "Complete OAuth flow first by visiting /auth"
+                }
+            }), 400
+        
+        # Check if credentials have calendar scope
+        if not credentials.scopes or 'https://www.googleapis.com/auth/calendar.readonly' not in credentials.scopes:
+            return jsonify({
+                "error": "Missing calendar scope",
+                "troubleshooting": {
+                    "details": "Calendar access not granted during OAuth flow",
+                    "error_type": "missing_scope",
+                    "solution": "Re-authorize with calendar permissions by visiting /auth"
+                }
+            }), 400
+
+        # Refresh credentials if necessary
+        if credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+            # Save refreshed credentials
+            save_user_credentials(config, user_email, credentials)
+
+        # Fetch calendar data
+        calendar_ics = fetch_google_calendar(credentials)
+        
+        # Update metrics
+        DOWNLOADS_TOTAL.labels(format="ics", status="success").inc()
+        
+        # Return ICS file
+        response = Response(
+            calendar_ics,
+            mimetype='text/calendar',
+            headers={
+                'Content-Disposition': f'attachment; filename="calendar_{user_email.replace("@", "_")}.ics"',
+                'Content-Type': 'text/calendar; charset=utf-8'
+            }
+        )
+        
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="download_calendar", status_code="200").inc()
+        return response
+
+    except Exception as e:
+        DOWNLOADS_TOTAL.labels(format="ics", status="error").inc()
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="download_calendar", status_code="500").inc()
+        
+        return jsonify({
+            "error": "Calendar download failed",
+            "troubleshooting": {
+                "details": str(e),
+                "error_type": "calendar_fetch_error",
+                "solution": "Check calendar permissions and try again"
+            }
+        }), 500
+
+
+@app.route('/export/calendar/<token>.ics')
+def export_calendar_public(token: str):
+    """Public calendar export endpoint using secret token."""
+    HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_calendar_public", status_code="200").inc()
+    
+    config = get_config()
+    
+    # Clean up expired tokens periodically
+    cleanup_expired_tokens(config)
+    
+    # Validate the export token
+    validation_result = validate_export_token(config, token)
+    if not validation_result:
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_calendar_public", status_code="404").inc()
+        return jsonify({
+            "error": "Invalid or expired export token",
+            "troubleshooting": {
+                "details": "The export token is invalid, expired, or has been revoked",
+                "error_type": "invalid_token",
+                "solution": "Generate a new export token through the authenticated API"
+            }
+        }), 404
+    
+    user_email, token_type = validation_result
+
+    try:
+        # Load user credentials
+        credentials = load_user_credentials(config, user_email)
+        if not credentials:
+            HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_calendar_public", status_code="500").inc()
+            return jsonify({
+                "error": "User credentials not found",
+                "troubleshooting": {
+                    "details": f"No stored credentials for user {user_email}",
+                    "error_type": "missing_credentials",
+                    "solution": "User needs to re-authenticate through OAuth flow"
+                }
+            }), 500
+        
+        # Check calendar scope
+        if not credentials.scopes or 'https://www.googleapis.com/auth/calendar.readonly' not in credentials.scopes:
+            HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_calendar_public", status_code="403").inc()
+            return jsonify({
+                "error": "Missing calendar scope",
+                "troubleshooting": {
+                    "details": "Calendar access not granted during OAuth flow",
+                    "error_type": "missing_scope",
+                    "solution": "User needs to re-authorize with calendar permissions"
+                }
+            }), 403
+
+        # Refresh credentials if necessary
+        if credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+            save_user_credentials(config, user_email, credentials)
+
+        # Fetch calendar data
+        calendar_ics = fetch_google_calendar(credentials)
+        
+        # Update metrics
+        DOWNLOADS_TOTAL.labels(format="ics", status="success").inc()
+        
+        # Return ICS file with proper headers
+        response = Response(
+            calendar_ics,
+            mimetype='text/calendar',
+            headers={
+                'Content-Disposition': f'attachment; filename="calendar_export.ics"',
+                'Content-Type': 'text/calendar; charset=utf-8',
+                'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+                'Expires': '0'
+            }
+        )
+        
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_calendar_public", status_code="200").inc()
+        print(f"📅 Public calendar export for user {user_email} via token (access tracked)")
+        return response
+
+    except Exception as e:
+        DOWNLOADS_TOTAL.labels(format="ics", status="error").inc()
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_calendar_public", status_code="500").inc()
+        
+        print(f"❌ Public calendar export failed for user {user_email}: {e}")
+        return jsonify({
+            "error": "Calendar export failed",
+            "troubleshooting": {
+                "details": str(e),
+                "error_type": "export_error",
+                "solution": "Check user permissions and try again later"
+            }
+        }), 500
+
+
+@app.route('/export/contacts/<token>.csv')
+def export_contacts_public(token: str):
+    """Public contacts export endpoint using secret token."""
+    HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_contacts_public", status_code="200").inc()
+    
+    config = get_config()
+    
+    # Clean up expired tokens periodically
+    cleanup_expired_tokens(config)
+    
+    # Validate the export token
+    validation_result = validate_export_token(config, token)
+    if not validation_result:
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_contacts_public", status_code="404").inc()
+        return jsonify({
+            "error": "Invalid or expired export token",
+            "troubleshooting": {
+                "details": "The export token is invalid, expired, or has been revoked",
+                "error_type": "invalid_token",
+                "solution": "Generate a new export token through the authenticated API"
+            }
+        }), 404
+    
+    user_email, token_type = validation_result
+
+    try:
+        # Load user credentials
+        credentials = load_user_credentials(config, user_email)
+        if not credentials:
+            HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_contacts_public", status_code="500").inc()
+            return jsonify({
+                "error": "User credentials not found",
+                "troubleshooting": {
+                    "details": f"No stored credentials for user {user_email}",
+                    "error_type": "missing_credentials",
+                    "solution": "User needs to re-authenticate through OAuth flow"
+                }
+            }), 500
+
+        # Refresh credentials if necessary
+        if credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+            save_user_credentials(config, user_email, credentials)
+
+        # Build Google People API service
+        service = build("people", "v1", credentials=credentials)
+        
+        # Download contacts using existing function
+        contacts_data = download_contacts(service, config)
+        
+        # Convert to CSV format
+        if not contacts_data:
+            csv_data = ""
+        else:
+            # Process contacts through _extract_contact_row to get structured data
+            rows = [_extract_contact_row(person) for person in contacts_data]
+            
+            # Define CSV headers (same as main download endpoint)
+            headers = [
+                "Full Name", "Given Name", "Family Name", "Nickname",
+                "Primary Email", "Other Emails", "Mobile Phone", "Work Phone",
+                "Home Phone", "Other Phones", "Organization", "Job Title",
+                "Birthday", "Street Address", "City", "Region",
+                "Postal Code", "Country", "Resource Name"
+            ]
+            
+            # Create CSV string
+            import io
+            import csv
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=headers)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+            csv_data = output.getvalue()
+            output.close()
+        
+        # Update metrics
+        DOWNLOADS_TOTAL.labels(format="csv", status="success").inc()
+        if contacts_data:
+            CONTACTS_DOWNLOADED.inc(len(contacts_data))
+        
+        # Return CSV file with proper headers
+        response = Response(
+            csv_data,
+            mimetype='text/csv',
+            headers={
+                'Content-Disposition': 'attachment; filename="contacts_export.csv"',
+                'Content-Type': 'text/csv; charset=utf-8',
+                'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+                'Expires': '0'
+            }
+        )
+        
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_contacts_public", status_code="200").inc()
+        print(f"📇 Public contacts export for user {user_email} via token (access tracked)")
+        return response
+
+    except Exception as e:
+        DOWNLOADS_TOTAL.labels(format="csv", status="error").inc()
+        HTTP_REQUESTS_TOTAL.labels(method="GET", endpoint="export_contacts_public", status_code="500").inc()
+        
+        print(f"❌ Public contacts export failed for user {user_email}: {e}")
+        return jsonify({
+            "error": "Contacts export failed",
+            "troubleshooting": {
+                "details": str(e),
+                "error_type": "export_error",
+                "solution": "Check user permissions and try again later"
+            }
+        }), 500
+
+
+@app.route('/export-token', methods=['POST'])
+def create_export_token_endpoint():
+    """Create a new export token for public access."""
+    HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="create_export_token", status_code="200").inc()
+    
+    config = get_config()
+    
+    # Authenticate user
+    user_email = authenticate_request()
+    if not user_email:
+        HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="create_export_token", status_code="401").inc()
+        return jsonify({
+            "error": "Authentication required",
+            "troubleshooting": {
+                "details": "Missing or invalid Authorization header",
+                "error_type": "authentication_error",
+                "solution": "Provide valid Bearer token in Authorization header"
+            }
+        }), 401
+
+    try:
+        # Get parameters from request
+        request_data = request.json or {}
+        expires_days = request_data.get('expires_days', 30)
+            
+        # Validate expires_days
+        if expires_days < 1 or expires_days > 365:
+            expires_days = 30
+
+        # Check credentials
+        credentials = load_user_credentials(config, user_email)
+        if not credentials:
+            return jsonify({
+                "error": "Access not authorized",
+                "troubleshooting": {
+                    "details": "User has not completed OAuth flow",
+                    "error_type": "missing_credentials",
+                    "solution": "Complete OAuth flow first"
+                }
+            }), 400
+            
+        # Check calendar scope
+        if not credentials.scopes or 'https://www.googleapis.com/auth/calendar.readonly' not in credentials.scopes:
+            return jsonify({
+                "error": "Calendar access not authorized",
+                "troubleshooting": {
+                    "details": "User has not granted calendar permissions",
+                    "error_type": "missing_calendar_scope",
+                    "solution": "Complete OAuth flow with calendar permissions first"
+                }
+            }), 400
+
+        # Create export token (always calendar type for full access)
+        token = create_export_token(config, user_email, 'calendar', expires_days)
+        
+        # Generate URLs based on token type
+        protocol = "https"
+        host = request.headers.get('Host', 'localhost:8000')
+        
+        expires_at = datetime.utcnow() + timedelta(days=expires_days)
+        
+        response_data = {
+            "export_token": token,
+            "expires_at": expires_at.isoformat() + 'Z',
+            "expires_days": expires_days,
+            "calendar_export_url": f"{protocol}://{host}/export/calendar/{token}.ics",
+            "contacts_export_url": f"{protocol}://{host}/export/contacts/{token}.csv",
+            "instructions": [
+                "Keep these URLs secret - anyone with access can download your calendar and contacts",
+                "This token works for both calendar (.ics) and contacts (.csv) exports",
+                "The URLs will expire automatically after the specified time",
+                "You can revoke the token at any time using the /export-token/revoke endpoint",
+                "Access attempts are logged for security monitoring"
+            ]
+        }
+        
+        response_data["security_notes"] = [
+            "Use HTTPS in production to protect the secret URLs",
+            "Consider shorter expiry times for sensitive data",
+            "Monitor access logs for unexpected usage"
+        ]
+        
+        HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="create_export_token", status_code="201").inc()
+        return jsonify(response_data), 201
+
+    except Exception as e:
+        HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="create_export_token", status_code="500").inc()
+        return jsonify({
+            "error": "Failed to create export token",
+            "troubleshooting": {
+                "details": str(e),
+                "error_type": "token_creation_error",
+                "solution": "Check server logs and try again"
+            }
+        }), 500
+
+
+@app.route('/export-token/revoke', methods=['POST'])
+def revoke_export_token_endpoint():
+    """Revoke an export token."""
+    HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="revoke_export_token", status_code="200").inc()
+    
+    config = get_config()
+    
+    # Authenticate user
+    user_email = authenticate_request()
+    if not user_email:
+        HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="revoke_export_token", status_code="401").inc()
+        return jsonify({
+            "error": "Authentication required",
+            "troubleshooting": {
+                "details": "Missing or invalid Authorization header",
+                "error_type": "authentication_error",
+                "solution": "Provide valid Bearer token in Authorization header"
+            }
+        }), 401
+
+    # Get token from request
+    if not request.is_json or not request.json or 'token' not in request.json:
+        return jsonify({
+            "error": "Token required",
+            "troubleshooting": {
+                "details": "Request must contain JSON with 'token' field",
+                "error_type": "missing_token",
+                "solution": "Provide the export token to revoke in request body"
+            }
+        }), 400
+
+    token = request.json['token']
+    
+    try:
+        success = revoke_export_token(config, token)
+        
+        if success:
+            HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="revoke_export_token", status_code="200").inc()
+            return jsonify({
+                "message": "Export token revoked successfully",
+                "revoked": True
+            })
+        else:
+            HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="revoke_export_token", status_code="404").inc()
+            return jsonify({
+                "error": "Token not found",
+                "troubleshooting": {
+                    "details": "The specified token does not exist or was already revoked",
+                    "error_type": "token_not_found",
+                    "solution": "Check the token value and try again"
+                }
+            }), 404
+
+    except Exception as e:
+        HTTP_REQUESTS_TOTAL.labels(method="POST", endpoint="revoke_export_token", status_code="500").inc()
+        return jsonify({
+            "error": "Failed to revoke token",
+            "troubleshooting": {
+                "details": str(e),
+                "error_type": "revocation_error",
+                "solution": "Check server logs and try again"
+            }
+        }), 500
+
+
+@app.route('/manage/<token>')
+def manage_export_token(token: str):
+    """Management page for export tokens."""
+    config = get_config()
+    
+    # Clean up expired tokens
+    cleanup_expired_tokens(config)
+    
+    # Get token information
+    token_info = get_export_token_info(config, token)
+    if not token_info:
+        return render_template('token_not_found.html', token=token), 404
+    
+    # Check if token is expired
+    if token_info['is_expired']:
+        return render_template('token_expired.html', 
+                             token_info=token_info, 
+                             token=token), 410
+    
+    # Generate export URLs
+    protocol = "https" if request.is_secure else "http"
+    host = request.headers.get('Host', 'localhost:8000')
+    
+    export_urls = {
+        'calendar': f"{protocol}://{host}/export/calendar/{token}.ics",
+        'contacts': f"{protocol}://{host}/export/contacts/{token}.csv"
+    }
+    
+    return render_template('manage_token.html', 
+                         token_info=token_info,
+                         token=token,
+                         export_urls=export_urls,
+                         host=host)
+
+
+@app.route('/manage/<token>/revoke', methods=['POST'])
+def revoke_token_from_management(token: str):
+    """Revoke token from management page."""
+    config = get_config()
+    
+    success = revoke_export_token(config, token)
+    
+    if success:
+        return render_template('token_revoked.html', token=token), 200
+    else:
+        return render_template('token_not_found.html', token=token), 404
+
+
+@app.route('/manage/<token>/revoke-all', methods=['POST'])
+def revoke_all_tokens_from_management(token: str):
+    """Revoke all tokens for the user from management page."""
+    config = get_config()
+    
+    # First get the token info to find the user
+    token_info = get_export_token_info(config, token)
+    if not token_info:
+        return render_template('token_not_found.html', token=token), 404
+    
+    # Revoke all tokens for this user
+    revoked_count = revoke_all_user_tokens(config, token_info['user_email'])
+    
+    return render_template('all_tokens_revoked.html', 
+                         token=token,
+                         revoked_count=revoked_count,
+                         user_email=token_info['user_email']), 200
 
 
 @app.route('/me')

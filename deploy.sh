@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Production deployment script for Google Contacts Downloader (Podman)
+# Production deployment script for Oauth Contacts and calendar exporter (Podman)
 set -e
 
-echo "🚀 Google Contacts Downloader - Production Deployment (Podman)"
+echo "🚀 Oauth Contacts and calendar exporter - Production Deployment (Podman)"
 echo "=============================================================="
 
 # Check prerequisites

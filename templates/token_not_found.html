@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Not Found - Oauth Contacts and Calendar Exporter</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .error-icon {
+            color: #f44336;
+            font-size: 5em;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #f44336;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+            margin-bottom: 30px;
+        }
+        .error-section {
+            background-color: #ffebee;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 25px 0;
+            border-left: 4px solid #f44336;
+            text-align: left;
+        }
+        .possible-reasons {
+            background-color: #fff3e0;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #ff9800;
+        }
+        .possible-reasons h3 {
+            color: #f57c00;
+            margin-top: 0;
+        }
+        .possible-reasons ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .possible-reasons li {
+            margin: 8px 0;
+            color: #666;
+        }
+        .button {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }
+        .button:hover {
+            background-color: #1557b0;
+            transform: translateY(-1px);
+        }
+        .button-secondary {
+            background-color: #6c757d;
+        }
+        .button-secondary:hover {
+            background-color: #545b62;
+        }
+        .help-section {
+            background-color: #e8f5e8;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #4caf50;
+            text-align: left;
+        }
+        .help-section h3 {
+            color: #2e7d32;
+            margin-top: 0;
+        }
+        .token-format {
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            border: 1px solid #dadce0;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #666;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-icon">🔍</div>
+        <h1>Token Not Found</h1>
+        <div class="subtitle">The export token you're looking for doesn't exist or is invalid</div>
+
+        <div class="error-section">
+            <h3>❌ Error Details</h3>
+            <p><strong>Token:</strong> <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">{{ token }}</code></p>
+            <p>This export token could not be found in our database. Please verify the token is correct.</p>
+        </div>
+
+        <div class="possible-reasons">
+            <h3>🤔 Possible Reasons</h3>
+            <ul>
+                <li><strong>Typo in URL:</strong> Check if the token in the URL is complete and correctly copied</li>
+                <li><strong>Token was revoked:</strong> The token might have been manually revoked</li>
+                <li><strong>Token expired:</strong> The token might have passed its expiration date and been cleaned up</li>
+                <li><strong>Wrong token:</strong> You might be using an old or different token</li>
+                <li><strong>Database issue:</strong> The token database might have been reset or corrupted</li>
+            </ul>
+        </div>
+
+        <div class="help-section">
+            <h3>💡 What You Can Do</h3>
+            <p><strong>1. Check the token format:</strong></p>
+            <div class="token-format">
+                Valid tokens look like: abc123def456...
+                (32 characters, letters and numbers only)
+            </div>
+            
+            <p><strong>2. Get a new token:</strong></p>
+            <p>If you need access to export data, you can create a new export token through the OAuth flow.</p>
+            
+            <p><strong>3. Contact support:</strong></p>
+            <p>If you believe this token should exist, there might be a technical issue that needs investigation.</p>
+        </div>
+
+        <div style="margin-top: 30px;">
+            <a href="/" class="button">🏠 Back to Home</a>
+            <a href="/oauth" class="button button-secondary">🔑 Create New Token</a>
+        </div>
+
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #999;">
+            <p>If you continue to have problems, please check:</p>
+            <ul style="text-align: left; display: inline-block;">
+                <li>The complete URL was copied correctly</li>
+                <li>No extra characters were added to the token</li>
+                <li>The token hasn't been revoked by the owner</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

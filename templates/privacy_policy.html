@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Privacy Policy & Terms of Service - Google Contacts Downloader</title>
+    <title>Privacy Policy & Terms of Service - Oauth Contacts and calendar exporter</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -68,10 +68,10 @@
 </head>
 <body>
     <div class="container">
-        <h1>Privacy Policy & Terms of Service for Google Contacts Downloader</h1>
+    <h1>Privacy Policy & Terms of Service for Oauth Contacts and calendar exporter</h1>
         <p><strong>Last Updated:</strong> October 8, 2025</p>
         
-        <p>This document outlines our Privacy Policy and Terms of Service for <strong>Google Contacts Downloader</strong> (referred to as "we," "us," or "our") when you use our software (the "Service").</p>
+    <p>This document outlines our Privacy Policy and Terms of Service for <strong>Oauth Contacts and calendar exporter</strong> (referred to as "we," "us," or "our") when you use our software (the "Service").</p>
         
         <p>We respect your privacy and are committed to protecting it through our compliance with this policy. By using our Service, you agree to the terms outlined in this document.</p>
 
@@ -90,28 +90,41 @@
             <li><strong>Email Address:</strong> Your primary email address associated with your Google Account.</li>
             <li><strong>Profile Information (openid):</strong> Basic profile information (e.g., name, profile picture, locale) as provided by the Google OpenID Connect standard.</li>
             <li><strong>Google Contacts:</strong> Access to your personal Google Contacts list.</li>
+            <li><strong>Google Calendar:</strong> Access to your calendar events (read-only) when you explicitly grant calendar scope. We only request calendar access if you use the calendar export feature.</li>
         </ul>
 
         <div class="highlight">
-            <p><strong>Crucially, our access to all of your Google information—including your Email, Profile, and Contacts—is strictly Read-Only.</strong> We cannot modify, delete, or add any data to your Google Account.</p>
+            <p><strong>Crucially, our access to your Google information—including your Email, Profile, Contacts, and Calendar events—is strictly Read-Only.</strong> We cannot modify, delete, or add any data to your Google Account.</p>
         </div>
 
         <h3>Purpose of Access</h3>
         <ul>
             <li><strong>Contacts Access:</strong> The Service requires read-only access to your Google Contacts to allow you to download and export your contacts.</li>
+            <li><strong>Calendar Access:</strong> If you choose to export calendar data, the Service requests read-only access to your Google Calendar so it can fetch events and produce an ICS export file. Calendar data is accessed only to generate the export and is not used for any other purpose.</li>
             <li><strong>Email and Profile Access:</strong> This is used for user authentication, personalization, and to identify you as the Service user.</li>
         </ul>
 
         <h3>Data Storage and Retention</h3>
 
         <div class="important">
-            <p><strong>We do not save your personal contact list or any contact details on our servers.</strong></p>
+            <p><strong>We do not save your personal contact list, calendar events, or any contact/calendar details on our servers.</strong></p>
         </div>
 
-        <p>We only store an <strong>authentication token</strong> provided by Google. This token is a secure, unique key that allows our Service to make authorized, read-only requests to Google's APIs on your behalf without us ever needing to store or see your actual Google password.</p>
-
+        <p>We only store:</p>
         <ul>
-            <li><strong>The Token:</strong> The token is <strong>encrypted using AES encryption</strong> and stored securely in our database. It is solely used to contact Google to access the explicitly permitted data points mentioned above.</li>
+            <li><strong>Authentication tokens:</strong> Encrypted tokens provided by Google for API access</li>
+            <li><strong>Export tokens:</strong> When you create public export URLs, we store hashed versions of the secret tokens with expiration dates. These allow public access to your calendar data until they expire or are revoked</li>
+        </ul>
+
+        <p><strong>Export Token Security:</strong> Public export tokens allow anyone with the secret URL to download your calendar and/or contacts data. These tokens:</p>
+        <ul>
+            <li>Are cryptographically secure and difficult to guess</li>
+            <li>Have configurable expiration dates (1-365 days)</li>
+            <li>Can be revoked at any time through the API</li>
+            <li>Are stored as hashes (not the actual token) in our database</li>
+            <li>Track access counts and timestamps for monitoring</li>
+            <li>Calendar tokens provide access to both calendar and contacts data</li>
+            <li>Contacts tokens provide access only to contacts data</li>
         </ul>
 
         <h2>2. Your Control and Data Revocation</h2>
@@ -122,7 +135,7 @@
 
         <ul>
             <li>You can disconnect your Google Account from our Service by revoking your access token through our API, or;</li>
-            <li>You can manage and revoke the permissions granted to <strong>Google Contacts Downloader</strong> by visiting your <strong>Google Security settings</strong> page at <a href="https://myaccount.google.com/permissions" target="_blank">https://myaccount.google.com/permissions</a>.</li>
+            <li>You can manage and revoke the permissions granted to <strong>Oauth Contacts and calendar exporter</strong> by visiting your <strong>Google Security settings</strong> page at <a href="https://myaccount.google.com/permissions" target="_blank">https://myaccount.google.com/permissions</a>.</li>
         </ul>
 
         <p>Revoking access will immediately disable the Service's ability to access your Google Contacts, email, or profile information. If you revoke access, we will immediately delete the stored Google authentication token.</p>
@@ -141,7 +154,7 @@
 
         <p>We do not sell, trade, or otherwise transfer your personal information to third parties. The only data sharing that occurs is:</p>
         <ul>
-            <li>Communication with Google's APIs using your encrypted authentication token to fetch your contacts</li>
+            <li>Communication with Google's APIs (People API and Calendar API) using your encrypted authentication token to fetch your contacts or calendar events when you request them</li>
             <li>No third-party analytics or tracking services are used</li>
         </ul>
 
@@ -151,7 +164,7 @@
 
         <h1>TERMS OF SERVICE</h1>
 
-        <p>By using Google Contacts Downloader (the "Service"), you agree to be bound by these Terms of Service. These terms create a legally binding agreement between you and the Service provider.</p>
+    <p>By using Oauth Contacts and calendar exporter (the "Service"), you agree to be bound by these Terms of Service. These terms create a legally binding agreement between you and the Service provider.</p>
 
         <h2>1. Acceptance and Agreement</h2>
         <p>Your use of this Service constitutes acceptance of these Terms of Service. If you do not agree to these terms, please do not use the Service.</p>
@@ -229,7 +242,7 @@
         <p>If you have any questions about this Privacy Policy or Terms of Service, please contact us through our GitHub repository or by using the contact information provided with this service.</p>
 
         <div class="footer">
-            <p>Google Contacts Downloader - A secure, read-only service for downloading your Google Contacts</p>
+            <p>Oauth Contacts and calendar exporter - A secure, read-only service for downloading your Google Contacts and Calendar</p>
         </div>
     </div>
 </body>
